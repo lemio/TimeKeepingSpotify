@@ -28,6 +28,14 @@ const App = (function() {
     let searchTimeout = null;
     let playbackInterval = null;
 
+    // Default avatar for users without a profile image
+    const DEFAULT_AVATAR = 'data:image/svg+xml,' + encodeURIComponent(
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">' +
+        '<circle cx="50" cy="50" r="50" fill="#1DB954"/>' +
+        '<text x="50" y="60" text-anchor="middle" fill="white" font-size="40">👤</text>' +
+        '</svg>'
+    );
+
     /**
      * Initialize the application
      */
@@ -131,7 +139,7 @@ const App = (function() {
             if (user.images && user.images.length > 0) {
                 userAvatar.src = user.images[0].url;
             } else {
-                userAvatar.src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle cx="50" cy="50" r="50" fill="%231DB954"/><text x="50" y="60" text-anchor="middle" fill="white" font-size="40">👤</text></svg>';
+                userAvatar.src = DEFAULT_AVATAR;
             }
 
             // Initialize scheduler

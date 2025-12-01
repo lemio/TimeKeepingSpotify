@@ -5,6 +5,9 @@
 
 const Scheduler = (function() {
     const SCHEDULES_KEY = 'spotify_schedules';
+    const SCHEDULE_CHECK_INTERVAL_MS = 1000; // Check every second for precise timing
+    const MAX_TRACK_MONITOR_SECONDS = 600; // Monitor track for up to 10 minutes
+    
     let schedules = [];
     let checkInterval = null;
     let previousPlaybackState = null;
@@ -115,8 +118,8 @@ const Scheduler = (function() {
         if (checkInterval) {
             clearInterval(checkInterval);
         }
-        // Check every second
-        checkInterval = setInterval(checkSchedules, 1000);
+        // Check every second for precise timing at schedule time
+        checkInterval = setInterval(checkSchedules, SCHEDULE_CHECK_INTERVAL_MS);
     }
 
     /**
@@ -202,11 +205,10 @@ const Scheduler = (function() {
      */
     async function monitorTrackEnd(schedule, prevState) {
         let checkCount = 0;
-        const maxChecks = 600; // Check for up to 10 minutes
 
         const checkPlayback = setInterval(async () => {
             checkCount++;
-            if (checkCount > maxChecks) {
+            if (checkCount > MAX_TRACK_MONITOR_SECONDS) {
                 clearInterval(checkPlayback);
                 return;
             }
