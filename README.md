@@ -1,6 +1,6 @@
 # TimeKeepingSpotify
 
-<img alt="Timekeeping app" src="https://github.com/user-attachments/assets/e3d93208-f507-4f56-8251-128ca5f22520" />
+<img width="50%" alt="Timekeeping app" src="https://github.com/user-attachments/assets/e3d93208-f507-4f56-8251-128ca5f22520" />
 
 A timekeeping/alarm app that uses the Spotify API to play specific music on set times.
 
