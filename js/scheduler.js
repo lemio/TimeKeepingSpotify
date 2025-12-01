@@ -1,0 +1,329 @@
+/**
+ * Scheduler Module
+ * Handles scheduling music to play at specific times
+ */
+
+const Scheduler = (function() {
+    const SCHEDULES_KEY = 'spotify_schedules';
+    let schedules = [];
+    let checkInterval = null;
+    let previousPlaybackState = null;
+
+    /**
+     * Initialize the scheduler
+     */
+    function init() {
+        loadSchedules();
+        startChecking();
+    }
+
+    /**
+     * Load schedules from localStorage
+     */
+    function loadSchedules() {
+        const stored = localStorage.getItem(SCHEDULES_KEY);
+        if (stored) {
+            try {
+                schedules = JSON.parse(stored);
+                // Filter out any past schedules that don't repeat
+                schedules = schedules.filter(s => !s.triggered || s.repeat);
+                // Reset triggered flag for repeating schedules on new day
+                schedules.forEach(s => {
+                    if (s.repeat) {
+                        const lastTriggered = s.lastTriggeredDate;
+                        const today = new Date().toDateString();
+                        if (lastTriggered !== today) {
+                            s.triggered = false;
+                        }
+                    }
+                });
+                saveSchedules();
+            } catch {
+                schedules = [];
+            }
+        }
+    }
+
+    /**
+     * Save schedules to localStorage
+     */
+    function saveSchedules() {
+        localStorage.setItem(SCHEDULES_KEY, JSON.stringify(schedules));
+    }
+
+    /**
+     * Add a new schedule
+     * @param {Object} schedule - Schedule object
+     * @param {string} schedule.time - Time in HH:MM format
+     * @param {string} schedule.trackUri - Spotify track URI
+     * @param {string} schedule.trackName - Track name for display
+     * @param {string} schedule.artistName - Artist name for display
+     * @param {number} schedule.volume - Volume level (0-100)
+     * @param {boolean} schedule.restorePlayback - Whether to restore previous playback after song ends
+     * @param {boolean} schedule.repeat - Whether to repeat daily
+     */
+    function addSchedule(schedule) {
+        const newSchedule = {
+            id: Date.now().toString(),
+            time: schedule.time,
+            trackUri: schedule.trackUri,
+            trackName: schedule.trackName || 'Unknown Track',
+            artistName: schedule.artistName || 'Unknown Artist',
+            volume: schedule.volume || 50,
+            restorePlayback: schedule.restorePlayback || false,
+            repeat: schedule.repeat !== false, // Default to repeat daily
+            triggered: false,
+            enabled: true,
+        };
+        schedules.push(newSchedule);
+        saveSchedules();
+        return newSchedule;
+    }
+
+    /**
+     * Remove a schedule by ID
+     * @param {string} scheduleId - Schedule ID
+     */
+    function removeSchedule(scheduleId) {
+        schedules = schedules.filter(s => s.id !== scheduleId);
+        saveSchedules();
+    }
+
+    /**
+     * Toggle schedule enabled state
+     * @param {string} scheduleId - Schedule ID
+     */
+    function toggleSchedule(scheduleId) {
+        const schedule = schedules.find(s => s.id === scheduleId);
+        if (schedule) {
+            schedule.enabled = !schedule.enabled;
+            saveSchedules();
+        }
+    }
+
+    /**
+     * Get all schedules
+     */
+    function getSchedules() {
+        return [...schedules];
+    }
+
+    /**
+     * Start checking for scheduled times
+     */
+    function startChecking() {
+        if (checkInterval) {
+            clearInterval(checkInterval);
+        }
+        // Check every second
+        checkInterval = setInterval(checkSchedules, 1000);
+    }
+
+    /**
+     * Stop checking for scheduled times
+     */
+    function stopChecking() {
+        if (checkInterval) {
+            clearInterval(checkInterval);
+            checkInterval = null;
+        }
+    }
+
+    /**
+     * Check if any schedules should be triggered
+     */
+    async function checkSchedules() {
+        const now = new Date();
+        const currentTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+        const currentSeconds = now.getSeconds();
+
+        for (const schedule of schedules) {
+            // Only trigger at the start of the minute (within first 2 seconds)
+            if (schedule.enabled && !schedule.triggered && schedule.time === currentTime && currentSeconds < 2) {
+                await triggerSchedule(schedule);
+            }
+        }
+    }
+
+    /**
+     * Trigger a scheduled playback
+     * @param {Object} schedule - Schedule to trigger
+     */
+    async function triggerSchedule(schedule) {
+        try {
+            console.log(`Triggering schedule: ${schedule.trackName} at ${schedule.time}`);
+
+            // Store current playback state if restore is enabled
+            if (schedule.restorePlayback) {
+                previousPlaybackState = await SpotifyAPI.getPlaybackState();
+            }
+
+            // Pause current playback
+            try {
+                await SpotifyAPI.pause();
+            } catch {
+                // Ignore if nothing is playing
+            }
+
+            // Wait a moment for pause to take effect
+            await new Promise(resolve => setTimeout(resolve, 500));
+
+            // Set volume
+            await SpotifyAPI.setVolume(schedule.volume);
+
+            // Play the scheduled track
+            await SpotifyAPI.play({
+                uris: [schedule.trackUri]
+            });
+
+            // Mark as triggered
+            schedule.triggered = true;
+            schedule.lastTriggeredDate = new Date().toDateString();
+            saveSchedules();
+
+            // Show notification
+            showNotification(`Now playing: ${schedule.trackName}`);
+
+            // If restore is enabled, monitor for track end
+            if (schedule.restorePlayback && previousPlaybackState) {
+                monitorTrackEnd(schedule, previousPlaybackState);
+            }
+
+        } catch (error) {
+            console.error('Error triggering schedule:', error);
+            showNotification(`Error: ${error.message}`, true);
+        }
+    }
+
+    /**
+     * Monitor for track end and restore previous playback
+     * @param {Object} schedule - The triggered schedule
+     * @param {Object} prevState - Previous playback state to restore
+     */
+    async function monitorTrackEnd(schedule, prevState) {
+        let checkCount = 0;
+        const maxChecks = 600; // Check for up to 10 minutes
+
+        const checkPlayback = setInterval(async () => {
+            checkCount++;
+            if (checkCount > maxChecks) {
+                clearInterval(checkPlayback);
+                return;
+            }
+
+            try {
+                const currentState = await SpotifyAPI.getPlaybackState();
+
+                // Check if the scheduled track is still playing
+                if (!currentState || !currentState.is_playing) {
+                    clearInterval(checkPlayback);
+                    await restorePreviousPlayback(prevState);
+                    return;
+                }
+
+                // Check if a different track is now playing (user changed it)
+                const currentTrackUri = currentState.item?.uri;
+                if (currentTrackUri && currentTrackUri !== schedule.trackUri) {
+                    clearInterval(checkPlayback);
+                    // User changed the track, don't restore
+                    return;
+                }
+
+                // Check if track has ended (progress near duration)
+                if (currentState.item && currentState.progress_ms >= currentState.item.duration_ms - 1000) {
+                    clearInterval(checkPlayback);
+                    await restorePreviousPlayback(prevState);
+                }
+
+            } catch (error) {
+                console.error('Error monitoring playback:', error);
+            }
+        }, 1000);
+    }
+
+    /**
+     * Restore previous playback state
+     * @param {Object} prevState - Previous playback state
+     */
+    async function restorePreviousPlayback(prevState) {
+        try {
+            console.log('Restoring previous playback...');
+
+            // Wait a moment for the track to fully end
+            await new Promise(resolve => setTimeout(resolve, 1000));
+
+            // Restore volume
+            if (prevState.device?.volume_percent !== undefined) {
+                await SpotifyAPI.setVolume(prevState.device.volume_percent);
+            }
+
+            // If there was a context (playlist/album), restore it
+            if (prevState.context?.uri) {
+                await SpotifyAPI.play({
+                    contextUri: prevState.context.uri,
+                    positionMs: prevState.progress_ms || 0,
+                });
+            } else if (prevState.item?.uri) {
+                // Otherwise, just play the previous track
+                await SpotifyAPI.play({
+                    uris: [prevState.item.uri],
+                    positionMs: prevState.progress_ms || 0,
+                });
+            }
+
+            showNotification('Restored previous playback');
+        } catch (error) {
+            console.error('Error restoring playback:', error);
+            showNotification('Could not restore previous playback', true);
+        }
+    }
+
+    /**
+     * Show a notification (delegated to app)
+     */
+    function showNotification(message, isError = false) {
+        // This will be handled by the app module
+        if (typeof App !== 'undefined' && App.showToast) {
+            App.showToast(message, isError);
+        } else {
+            console.log(message);
+        }
+    }
+
+    /**
+     * Reset all schedules for a new day
+     */
+    function resetDailySchedules() {
+        schedules.forEach(s => {
+            if (s.repeat) {
+                s.triggered = false;
+            }
+        });
+        saveSchedules();
+    }
+
+    /**
+     * Manually trigger a schedule (for testing)
+     * @param {string} scheduleId - Schedule ID
+     */
+    async function triggerNow(scheduleId) {
+        const schedule = schedules.find(s => s.id === scheduleId);
+        if (schedule) {
+            schedule.triggered = false;
+            await triggerSchedule(schedule);
+        }
+    }
+
+    // Public API
+    return {
+        init,
+        addSchedule,
+        removeSchedule,
+        toggleSchedule,
+        getSchedules,
+        startChecking,
+        stopChecking,
+        resetDailySchedules,
+        triggerNow,
+    };
+})();
