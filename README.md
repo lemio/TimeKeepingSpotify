@@ -1,5 +1,7 @@
 # TimeKeepingSpotify
 
+<img width="1290" height="3783" alt="fascinating-cucurucho-4efff1 netlify app_(iPhone 14 Pro Max)" src="https://github.com/user-attachments/assets/e3d93208-f507-4f56-8251-128ca5f22520" />
+
 A timekeeping/alarm app that uses the Spotify API to play specific music on set times.
 
 ## Features
