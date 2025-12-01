@@ -6,7 +6,7 @@
 const SpotifyAuth = (function() {
     // Configuration - User should update CLIENT_ID with their Spotify App Client ID
     // Redirect URI should match what's registered in Spotify Developer Dashboard
-    const CLIENT_ID = 'YOUR_SPOTIFY_CLIENT_ID'; // Replace with your Spotify Client ID
+    const CLIENT_ID = '87f43a21f2684990a3048c0b33bf52a5'; // Replace with your Spotify Client ID
     const REDIRECT_URI = window.location.origin + window.location.pathname;
     const SCOPES = [
         'user-read-private',
