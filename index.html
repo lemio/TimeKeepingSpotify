@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TimeKeeping Spotify</title>
+    <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🎵 TimeKeeping Spotify</h1>
+            <p class="subtitle">Schedule music to play at specific times</p>
+        </header>
+
+        <!-- Login Section -->
+        <section id="login-section" class="section">
+            <div class="card">
+                <h2>Connect to Spotify</h2>
+                <p>Login with your Spotify account to control playback and schedule music.</p>
+                <button id="login-btn" class="btn btn-primary">
+                    <span class="spotify-icon">🎧</span> Login with Spotify
+                </button>
+            </div>
+        </section>
+
+        <!-- Main App Section (hidden until logged in) -->
+        <section id="app-section" class="section hidden">
+            <!-- User Info -->
+            <div class="card user-info">
+                <div class="user-details">
+                    <img id="user-avatar" src="" alt="User Avatar" class="avatar">
+                    <div>
+                        <h3 id="user-name">User</h3>
+                        <p id="user-email" class="text-muted">email@example.com</p>
+                    </div>
+                </div>
+                <button id="logout-btn" class="btn btn-secondary">Logout</button>
+            </div>
+
+            <!-- Current Playback -->
+            <div class="card">
+                <h2>Current Playback</h2>
+                <div id="current-playback" class="playback-info">
+                    <p class="text-muted">No active playback</p>
+                </div>
+            </div>
+
+            <!-- Schedule New Alarm -->
+            <div class="card">
+                <h2>Schedule Music</h2>
+                <form id="schedule-form">
+                    <div class="form-group">
+                        <label for="schedule-time">Time</label>
+                        <input type="time" id="schedule-time" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="schedule-track">Song/Track URI or Search</label>
+                        <input type="text" id="schedule-track" placeholder="spotify:track:... or search term" required>
+                        <div id="search-results" class="search-results hidden"></div>
+                    </div>
+                    <div class="form-group">
+                        <label for="schedule-volume">Volume (0-100)</label>
+                        <input type="range" id="schedule-volume" min="0" max="100" value="50">
+                        <span id="volume-display">50%</span>
+                    </div>
+                    <div class="form-group checkbox-group">
+                        <input type="checkbox" id="schedule-restore">
+                        <label for="schedule-restore">Return to previous playlist when song finishes</label>
+                    </div>
+                    <button type="submit" class="btn btn-primary">Add Schedule</button>
+                </form>
+            </div>
+
+            <!-- Scheduled Items -->
+            <div class="card">
+                <h2>Scheduled Music</h2>
+                <div id="schedules-list" class="schedules-list">
+                    <p class="text-muted">No scheduled items</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- Notification Toast -->
+        <div id="toast" class="toast hidden"></div>
+    </div>
+
+    <script src="js/spotify-auth.js"></script>
+    <script src="js/spotify-api.js"></script>
+    <script src="js/scheduler.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html>
