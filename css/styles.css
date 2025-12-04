@@ -340,6 +340,35 @@ header h1 {
     font-size: 0.75rem;
 }
 
+.schedule-item.active {
+    background: rgba(29, 185, 84, 0.15);
+    border: 2px solid rgba(29, 185, 84, 0.5);
+}
+
+.schedule-item .active-status {
+    font-size: 0.9rem;
+    color: #1DB954;
+    font-weight: 600;
+    margin-top: 6px;
+    padding: 6px 10px;
+    background: rgba(29, 185, 84, 0.2);
+    border-radius: 6px;
+    animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+    0%, 100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.7;
+    }
+}
+
+.schedule-item.disabled {
+    opacity: 0.5;
+}
+
 /* Playback Info */
 .playback-info {
     display: flex;

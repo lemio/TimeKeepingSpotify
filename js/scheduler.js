@@ -11,6 +11,8 @@ const Scheduler = (function() {
     let schedules = [];
     let checkInterval = null;
     let previousPlaybackState = null;
+    let activeSchedule = null; // Track currently playing scheduled track
+    let activeScheduleStartTime = null; // When the scheduled track started playing
 
     /**
      * Initialize the scheduler
@@ -183,9 +185,11 @@ const Scheduler = (function() {
                 uris: [schedule.trackUri]
             });
 
-            // Mark as triggered
+            // Mark as triggered and set as active
             schedule.triggered = true;
             schedule.lastTriggeredDate = new Date().toDateString();
+            activeSchedule = schedule;
+            activeScheduleStartTime = Date.now();
             saveSchedules();
 
             // Show notification
@@ -202,6 +206,9 @@ const Scheduler = (function() {
         } catch (error) {
             console.error('Error triggering schedule:', error);
             showNotification(`Error: ${error.message}`, true);
+            // Clear active schedule on error
+            activeSchedule = null;
+            activeScheduleStartTime = null;
         }
     }
 
@@ -233,6 +240,10 @@ const Scheduler = (function() {
                             await restorePreviousPlayback(previousPlaybackState);
                         }
                     }
+                    
+                    // Clear active schedule
+                    activeSchedule = null;
+                    activeScheduleStartTime = null;
                     return;
                 }
                 
@@ -241,12 +252,16 @@ const Scheduler = (function() {
                 if (!currentState || currentState.item?.uri !== schedule.trackUri) {
                     clearInterval(checkPlayback);
                     // User changed the track, don't interfere
+                    activeSchedule = null;
+                    activeScheduleStartTime = null;
                     return;
                 }
                 
             } catch (error) {
                 console.error('Error monitoring playback duration:', error);
                 clearInterval(checkPlayback);
+                activeSchedule = null;
+                activeScheduleStartTime = null;
             }
         }, 1000);
     }
@@ -263,6 +278,8 @@ const Scheduler = (function() {
             checkCount++;
             if (checkCount > MAX_TRACK_MONITOR_SECONDS) {
                 clearInterval(checkPlayback);
+                activeSchedule = null;
+                activeScheduleStartTime = null;
                 return;
             }
 
@@ -272,6 +289,8 @@ const Scheduler = (function() {
                 // Check if the scheduled track is still playing
                 if (!currentState || !currentState.is_playing) {
                     clearInterval(checkPlayback);
+                    activeSchedule = null;
+                    activeScheduleStartTime = null;
                     await restorePreviousPlayback(prevState);
                     return;
                 }
@@ -280,6 +299,8 @@ const Scheduler = (function() {
                 const currentTrackUri = currentState.item?.uri;
                 if (currentTrackUri && currentTrackUri !== schedule.trackUri) {
                     clearInterval(checkPlayback);
+                    activeSchedule = null;
+                    activeScheduleStartTime = null;
                     // User changed the track, don't restore
                     return;
                 }
@@ -287,6 +308,8 @@ const Scheduler = (function() {
                 // Check if track has ended (progress near duration)
                 if (currentState.item && currentState.progress_ms >= currentState.item.duration_ms - 1000) {
                     clearInterval(checkPlayback);
+                    activeSchedule = null;
+                    activeScheduleStartTime = null;
                     await restorePreviousPlayback(prevState);
                 }
 
@@ -312,21 +335,25 @@ const Scheduler = (function() {
                 await SpotifyAPI.setVolume(prevState.device.volume_percent);
             }
 
-            // If there was a context (playlist/album), restore it
+            // If there was a context (playlist/album), restore it and start playback
             if (prevState.context?.uri) {
                 await SpotifyAPI.play({
                     contextUri: prevState.context.uri,
                     positionMs: prevState.progress_ms || 0,
                 });
+                showNotification('Restored previous playback');
             } else if (prevState.item?.uri) {
-                // Otherwise, just play the previous track
+                // Otherwise, just play the previous track and start playback
                 await SpotifyAPI.play({
                     uris: [prevState.item.uri],
                     positionMs: prevState.progress_ms || 0,
                 });
+                showNotification('Restored previous playback');
+            } else {
+                // No previous playback to restore, just notify
+                showNotification('Previous playback restored (was paused)');
             }
 
-            showNotification('Restored previous playback');
         } catch (error) {
             console.error('Error restoring playback:', error);
             showNotification('Could not restore previous playback', true);
@@ -369,6 +396,30 @@ const Scheduler = (function() {
         }
     }
 
+    /**
+     * Get the currently active schedule (if any)
+     * @returns {Object|null} Active schedule info with elapsed and remaining time
+     */
+    function getActiveScheduleInfo() {
+        if (!activeSchedule || !activeScheduleStartTime) {
+            return null;
+        }
+
+        const elapsedMs = Date.now() - activeScheduleStartTime;
+        const elapsedSeconds = Math.floor(elapsedMs / 1000);
+        
+        let remainingSeconds = null;
+        if (activeSchedule.playbackDuration) {
+            remainingSeconds = Math.max(0, activeSchedule.playbackDuration - elapsedSeconds);
+        }
+
+        return {
+            scheduleId: activeSchedule.id,
+            elapsedSeconds,
+            remainingSeconds,
+        };
+    }
+
     // Public API
     return {
         init,
@@ -380,5 +431,6 @@ const Scheduler = (function() {
         stopChecking,
         resetDailySchedules,
         triggerNow,
+        getActiveScheduleInfo,
     };
 })();

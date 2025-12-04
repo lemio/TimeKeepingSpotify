@@ -336,18 +336,9 @@ const App = (function() {
             trackDuration: selectedTrack.duration_ms ? Math.floor(selectedTrack.duration_ms / 1000) : null
         });
 
-        // Reset form
-        scheduleForm.reset();
-        volumeDisplay.textContent = '50%';
-        selectedTrack = null;
-        trackDurationInfo.classList.add('hidden');
-        
-        // Reset playback duration to default
-        playbackDuration.max = 300;
-        playbackDuration.value = 300;
-        playbackDurationNumber.max = 300;
-        playbackDurationNumber.value = 300;
-        updatePlaybackDurationDisplay(300);
+        // Only reset the time field - keep volume, song, and checkbox
+        scheduleTime.value = '';
+        // Note: volume, scheduleTrack, scheduleRestore, and playbackDuration remain unchanged
 
         // Refresh schedule list
         renderSchedules();
@@ -372,13 +363,33 @@ const App = (function() {
         // Sort by time
         schedules.sort((a, b) => a.time.localeCompare(b.time));
 
+        // Get active schedule info
+        const activeInfo = Scheduler.getActiveScheduleInfo();
+
         schedulesList.innerHTML = schedules.map(schedule => {
             const countdownText = getCountdownText(schedule.time);
             const playbackInfo = schedule.playbackDuration && schedule.trackDuration ? 
                 ` · Play: ${formatTime(schedule.playbackDuration)}/${formatTime(schedule.trackDuration)}` : '';
             
+            // Check if this is the currently active schedule
+            const isActive = activeInfo && activeInfo.scheduleId === schedule.id;
+            const activeClass = isActive ? 'active' : '';
+            
+            // Build active status HTML
+            let activeStatusHtml = '';
+            if (isActive) {
+                const elapsedText = formatTime(activeInfo.elapsedSeconds);
+                const remainingText = activeInfo.remainingSeconds !== null ? 
+                    formatTime(activeInfo.remainingSeconds) : '∞';
+                activeStatusHtml = `
+                    <div class="active-status">
+                        ▶ Playing: ${elapsedText} elapsed · ${remainingText} remaining
+                    </div>
+                `;
+            }
+            
             return `
-                <div class="schedule-item ${schedule.enabled ? '' : 'disabled'}" data-id="${schedule.id}">
+                <div class="schedule-item ${schedule.enabled ? '' : 'disabled'} ${activeClass}" data-id="${schedule.id}">
                     <span class="time">${schedule.time}</span>
                     <div class="track-info">
                         <div class="track-name">${escapeHtml(schedule.trackName)}</div>
@@ -386,6 +397,7 @@ const App = (function() {
                             ${escapeHtml(schedule.artistName)} · Volume: ${schedule.volume}%${playbackInfo}
                             ${schedule.restorePlayback ? '<span class="restore-badge">↩ Restore</span>' : ''}
                         </div>
+                        ${activeStatusHtml}
                         <div class="countdown" data-time="${schedule.time}">${countdownText}</div>
                     </div>
                     <div class="schedule-actions">
@@ -593,6 +605,7 @@ const App = (function() {
         }
         
         countdownInterval = setInterval(() => {
+            // Update countdown timers
             document.querySelectorAll('.countdown').forEach(element => {
                 const scheduleTime = element.dataset.time;
                 if (scheduleTime) {
@@ -607,6 +620,18 @@ const App = (function() {
                     }
                 }
             });
+            
+            // Update active schedule status in real-time
+            const activeInfo = Scheduler.getActiveScheduleInfo();
+            if (activeInfo) {
+                const activeStatusElement = document.querySelector(`[data-id="${activeInfo.scheduleId}"] .active-status`);
+                if (activeStatusElement) {
+                    const elapsedText = formatTime(activeInfo.elapsedSeconds);
+                    const remainingText = activeInfo.remainingSeconds !== null ? 
+                        formatTime(activeInfo.remainingSeconds) : '∞';
+                    activeStatusElement.textContent = `▶ Playing: ${elapsedText} elapsed · ${remainingText} remaining`;
+                }
+            }
         }, 1000);
     }
 
