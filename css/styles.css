@@ -188,6 +188,54 @@ header h1 {
     cursor: pointer;
 }
 
+/* Track Duration Info */
+.track-duration-info {
+    margin-top: 8px;
+    padding: 8px 12px;
+    background: rgba(29, 185, 84, 0.15);
+    border-radius: 6px;
+    color: #b3b3b3;
+    font-size: 0.9rem;
+}
+
+.track-duration-info strong {
+    color: #1DB954;
+}
+
+/* Playback Duration Controls */
+#playback-duration {
+    width: calc(50% - 10px);
+    margin-right: 10px;
+}
+
+#playback-duration-number {
+    width: 70px;
+    padding: 6px 8px;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.1);
+    color: #ffffff;
+    font-size: 0.9rem;
+    text-align: center;
+}
+
+#playback-duration-number:focus {
+    outline: none;
+    border-color: #1DB954;
+}
+
+#playback-duration-display {
+    color: #1DB954;
+    font-weight: 600;
+    margin: 0 8px;
+}
+
+.duration-hint {
+    color: #b3b3b3;
+    font-size: 0.85rem;
+    font-style: italic;
+}
+
 /* Search Results */
 .search-results {
     margin-top: 10px;
@@ -266,6 +314,17 @@ header h1 {
 .schedule-item .track-details {
     font-size: 0.85rem;
     color: #b3b3b3;
+}
+
+.schedule-item .countdown {
+    font-size: 0.85rem;
+    color: #1DB954;
+    font-weight: 500;
+    margin-top: 4px;
+}
+
+.schedule-item .countdown.past {
+    color: #e74c3c;
 }
 
 .schedule-item .schedule-actions {
