@@ -58,6 +58,16 @@
                         <label for="schedule-track">Song/Track URI or Search</label>
                         <input type="text" id="schedule-track" placeholder="spotify:track:... or search term" required>
                         <div id="search-results" class="search-results hidden"></div>
+                        <div id="track-duration-info" class="track-duration-info hidden">
+                            <span>Track duration: <strong id="track-duration-display">0:00</strong></span>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="playback-duration">Playback Duration (play from start)</label>
+                        <input type="range" id="playback-duration" min="0" max="300" value="300" step="1">
+                        <input type="number" id="playback-duration-number" min="0" max="300" value="300" step="1">
+                        <span id="playback-duration-display">5:00</span>
+                        <span class="duration-hint">(full track)</span>
                     </div>
                     <div class="form-group">
                         <label for="schedule-volume">Volume (0-100)</label>

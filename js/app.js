@@ -22,11 +22,17 @@ const App = (function() {
     let searchResults;
     let schedulesList;
     let toast;
+    let playbackDuration;
+    let playbackDurationNumber;
+    let playbackDurationDisplay;
+    let trackDurationInfo;
+    let trackDurationDisplay;
 
     // State
     let selectedTrack = null;
     let searchTimeout = null;
     let playbackInterval = null;
+    let countdownInterval = null;
 
     // Default avatar for users without a profile image
     const DEFAULT_AVATAR = 'data:image/svg+xml,' + encodeURIComponent(
@@ -78,6 +84,11 @@ const App = (function() {
         searchResults = document.getElementById('search-results');
         schedulesList = document.getElementById('schedules-list');
         toast = document.getElementById('toast');
+        playbackDuration = document.getElementById('playback-duration');
+        playbackDurationNumber = document.getElementById('playback-duration-number');
+        playbackDurationDisplay = document.getElementById('playback-duration-display');
+        trackDurationInfo = document.getElementById('track-duration-info');
+        trackDurationDisplay = document.getElementById('track-duration-display');
     }
 
     /**
@@ -95,6 +106,22 @@ const App = (function() {
         // Volume slider
         scheduleVolume.addEventListener('input', () => {
             volumeDisplay.textContent = `${scheduleVolume.value}%`;
+        });
+
+        // Playback duration slider and number input
+        playbackDuration.addEventListener('input', () => {
+            const seconds = parseInt(playbackDuration.value);
+            playbackDurationNumber.value = seconds;
+            updatePlaybackDurationDisplay(seconds);
+        });
+
+        playbackDurationNumber.addEventListener('input', () => {
+            const seconds = Math.max(0, parseInt(playbackDurationNumber.value) || 0);
+            const maxSeconds = parseInt(playbackDuration.max);
+            const clampedSeconds = Math.min(seconds, maxSeconds);
+            playbackDuration.value = clampedSeconds;
+            playbackDurationNumber.value = clampedSeconds;
+            updatePlaybackDurationDisplay(clampedSeconds);
         });
 
         // Track search
@@ -166,6 +193,9 @@ const App = (function() {
         if (playbackInterval) {
             clearInterval(playbackInterval);
         }
+        if (countdownInterval) {
+            clearInterval(countdownInterval);
+        }
         showLogin();
         showToast('Logged out successfully');
     }
@@ -221,7 +251,7 @@ const App = (function() {
         }
 
         searchResults.innerHTML = tracks.map(track => `
-            <div class="search-result-item" data-uri="${track.uri}" data-name="${escapeHtml(track.name)}" data-artist="${escapeHtml(track.artists[0]?.name || 'Unknown')}">
+            <div class="search-result-item" data-uri="${track.uri}" data-name="${escapeHtml(track.name)}" data-artist="${escapeHtml(track.artists[0]?.name || 'Unknown')}" data-duration="${track.duration_ms || 0}">
                 <img src="${track.album.images[2]?.url || track.album.images[0]?.url || ''}" alt="">
                 <div class="track-info">
                     <div class="track-name">${escapeHtml(track.name)}</div>
@@ -236,7 +266,8 @@ const App = (function() {
                 const track = {
                     uri: item.dataset.uri,
                     name: item.dataset.name,
-                    artists: [{ name: item.dataset.artist }]
+                    artists: [{ name: item.dataset.artist }],
+                    duration_ms: parseInt(item.dataset.duration)
                 };
                 selectTrack(track);
             });
@@ -252,10 +283,27 @@ const App = (function() {
         selectedTrack = {
             uri: track.uri,
             name: track.name,
-            artist: track.artists[0]?.name || 'Unknown'
+            artist: track.artists[0]?.name || 'Unknown',
+            duration_ms: track.duration_ms
         };
         scheduleTrack.value = `${track.name} - ${selectedTrack.artist}`;
         searchResults.classList.add('hidden');
+        
+        // Update track duration display
+        if (track.duration_ms) {
+            const durationSeconds = Math.floor(track.duration_ms / 1000);
+            trackDurationDisplay.textContent = formatTime(durationSeconds);
+            trackDurationInfo.classList.remove('hidden');
+            
+            // Update playback duration slider max
+            playbackDuration.max = durationSeconds;
+            playbackDurationNumber.max = durationSeconds;
+            
+            // Set to full track by default
+            playbackDuration.value = durationSeconds;
+            playbackDurationNumber.value = durationSeconds;
+            updatePlaybackDurationDisplay(durationSeconds);
+        }
     }
 
     /**
@@ -275,6 +323,8 @@ const App = (function() {
             return;
         }
 
+        const playbackDurationSeconds = parseInt(playbackDuration.value);
+
         const schedule = Scheduler.addSchedule({
             time: time,
             trackUri: selectedTrack.uri,
@@ -282,15 +332,28 @@ const App = (function() {
             artistName: selectedTrack.artist,
             volume: parseInt(scheduleVolume.value),
             restorePlayback: scheduleRestore.checked,
+            playbackDuration: playbackDurationSeconds,
+            trackDuration: selectedTrack.duration_ms ? Math.floor(selectedTrack.duration_ms / 1000) : null
         });
 
         // Reset form
         scheduleForm.reset();
         volumeDisplay.textContent = '50%';
         selectedTrack = null;
+        trackDurationInfo.classList.add('hidden');
+        
+        // Reset playback duration to default
+        playbackDuration.max = 300;
+        playbackDuration.value = 300;
+        playbackDurationNumber.max = 300;
+        playbackDurationNumber.value = 300;
+        updatePlaybackDurationDisplay(300);
 
         // Refresh schedule list
         renderSchedules();
+
+        // Suggest next time based on pattern
+        suggestNextTime(schedule.time);
 
         showToast(`Scheduled: ${schedule.trackName} at ${schedule.time}`);
     }
@@ -309,29 +372,36 @@ const App = (function() {
         // Sort by time
         schedules.sort((a, b) => a.time.localeCompare(b.time));
 
-        schedulesList.innerHTML = schedules.map(schedule => `
-            <div class="schedule-item ${schedule.enabled ? '' : 'disabled'}" data-id="${schedule.id}">
-                <span class="time">${schedule.time}</span>
-                <div class="track-info">
-                    <div class="track-name">${escapeHtml(schedule.trackName)}</div>
-                    <div class="track-details">
-                        ${escapeHtml(schedule.artistName)} · Volume: ${schedule.volume}%
-                        ${schedule.restorePlayback ? '<span class="restore-badge">↩ Restore</span>' : ''}
+        schedulesList.innerHTML = schedules.map(schedule => {
+            const countdownText = getCountdownText(schedule.time);
+            const playbackInfo = schedule.playbackDuration && schedule.trackDuration ? 
+                ` · Play: ${formatTime(schedule.playbackDuration)}/${formatTime(schedule.trackDuration)}` : '';
+            
+            return `
+                <div class="schedule-item ${schedule.enabled ? '' : 'disabled'}" data-id="${schedule.id}">
+                    <span class="time">${schedule.time}</span>
+                    <div class="track-info">
+                        <div class="track-name">${escapeHtml(schedule.trackName)}</div>
+                        <div class="track-details">
+                            ${escapeHtml(schedule.artistName)} · Volume: ${schedule.volume}%${playbackInfo}
+                            ${schedule.restorePlayback ? '<span class="restore-badge">↩ Restore</span>' : ''}
+                        </div>
+                        <div class="countdown" data-time="${schedule.time}">${countdownText}</div>
+                    </div>
+                    <div class="schedule-actions">
+                        <button class="btn btn-secondary btn-small toggle-btn" title="${schedule.enabled ? 'Disable' : 'Enable'}">
+                            ${schedule.enabled ? '⏸' : '▶'}
+                        </button>
+                        <button class="btn btn-secondary btn-small test-btn" title="Test now">
+                            🔊
+                        </button>
+                        <button class="btn btn-danger btn-small delete-btn" title="Delete">
+                            ✕
+                        </button>
                     </div>
                 </div>
-                <div class="schedule-actions">
-                    <button class="btn btn-secondary btn-small toggle-btn" title="${schedule.enabled ? 'Disable' : 'Enable'}">
-                        ${schedule.enabled ? '⏸' : '▶'}
-                    </button>
-                    <button class="btn btn-secondary btn-small test-btn" title="Test now">
-                        🔊
-                    </button>
-                    <button class="btn btn-danger btn-small delete-btn" title="Delete">
-                        ✕
-                    </button>
-                </div>
-            </div>
-        `).join('');
+            `;
+        }).join('');
 
         // Add event listeners
         schedulesList.querySelectorAll('.schedule-item').forEach(item => {
@@ -352,6 +422,9 @@ const App = (function() {
                 showToast('Schedule removed');
             });
         });
+        
+        // Start countdown updates
+        startCountdownUpdates();
     }
 
     /**
@@ -410,6 +483,146 @@ const App = (function() {
         const div = document.createElement('div');
         div.textContent = text;
         return div.innerHTML;
+    }
+
+    /**
+     * Format seconds to MM:SS
+     */
+    function formatTime(seconds) {
+        const mins = Math.floor(seconds / 60);
+        const secs = seconds % 60;
+        return `${mins}:${String(secs).padStart(2, '0')}`;
+    }
+
+    /**
+     * Suggest next schedule time based on previous pattern
+     */
+    function suggestNextTime(lastTime) {
+        const schedules = Scheduler.getSchedules();
+        
+        // If we have at least 2 schedules, calculate the time difference
+        if (schedules.length >= 2) {
+            // Sort by time
+            const sorted = schedules.slice().sort((a, b) => a.time.localeCompare(b.time));
+            const lastTwo = sorted.slice(-2);
+            
+            // Calculate time difference in minutes
+            const [h1, m1] = lastTwo[0].time.split(':').map(Number);
+            const [h2, m2] = lastTwo[1].time.split(':').map(Number);
+            let time1 = h1 * 60 + m1;
+            let time2 = h2 * 60 + m2;
+            
+            // Handle day boundary - if time2 is less than time1, add 24 hours to time2
+            if (time2 < time1) {
+                time2 += 24 * 60;
+            }
+            
+            const diff = time2 - time1;
+            
+            // Apply the same difference
+            const [h, m] = lastTime.split(':').map(Number);
+            const currentMinutes = h * 60 + m;
+            let nextMinutes = currentMinutes + diff;
+            
+            // Handle day overflow - normalize to 0-1439 range
+            nextMinutes = ((nextMinutes % (24 * 60)) + (24 * 60)) % (24 * 60);
+            
+            const nextHours = Math.floor(nextMinutes / 60);
+            const nextMins = nextMinutes % 60;
+            
+            const suggestedTime = `${String(nextHours).padStart(2, '0')}:${String(nextMins).padStart(2, '0')}`;
+            scheduleTime.value = suggestedTime;
+        } else {
+            // No pattern yet, suggest next round time (:00 or :30)
+            const [h, m] = lastTime.split(':').map(Number);
+            let nextMinutes;
+            let nextHours = h;
+            
+            if (m < 30) {
+                nextMinutes = 30;
+            } else {
+                nextMinutes = 0;
+                nextHours = (h + 1) % 24;
+            }
+            
+            const suggestedTime = `${String(nextHours).padStart(2, '0')}:${String(nextMinutes).padStart(2, '0')}`;
+            scheduleTime.value = suggestedTime;
+        }
+    }
+
+    /**
+     * Get countdown text for a schedule time
+     */
+    function getCountdownText(scheduleTime) {
+        const now = new Date();
+        const [hours, minutes] = scheduleTime.split(':').map(Number);
+        
+        const scheduleDate = new Date();
+        scheduleDate.setHours(hours, minutes, 0, 0);
+        
+        // If the time is in the past today, it's for tomorrow
+        if (scheduleDate <= now) {
+            scheduleDate.setDate(scheduleDate.getDate() + 1);
+        }
+        
+        const diffMs = scheduleDate - now;
+        const diffSeconds = Math.floor(diffMs / 1000);
+        const diffMinutes = Math.floor(diffSeconds / 60);
+        const diffHours = Math.floor(diffMinutes / 60);
+        
+        if (diffSeconds < 60) {
+            return `in ${diffSeconds} second${diffSeconds !== 1 ? 's' : ''}`;
+        } else if (diffMinutes < 60) {
+            const secs = diffSeconds % 60;
+            return `in ${diffMinutes}:${String(secs).padStart(2, '0')} minutes`;
+        } else if (diffHours < 24) {
+            const mins = diffMinutes % 60;
+            return `in ${diffHours}:${String(mins).padStart(2, '0')} hours`;
+        } else {
+            const days = Math.floor(diffHours / 24);
+            return `in ${days} day${days !== 1 ? 's' : ''}`;
+        }
+    }
+
+    /**
+     * Start updating countdowns
+     */
+    function startCountdownUpdates() {
+        if (countdownInterval) {
+            clearInterval(countdownInterval);
+        }
+        
+        countdownInterval = setInterval(() => {
+            document.querySelectorAll('.countdown').forEach(element => {
+                const scheduleTime = element.dataset.time;
+                if (scheduleTime) {
+                    const countdownText = getCountdownText(scheduleTime);
+                    element.textContent = countdownText;
+                    
+                    // Update class based on countdown
+                    if (countdownText === 'Past') {
+                        element.classList.add('past');
+                    } else {
+                        element.classList.remove('past');
+                    }
+                }
+            });
+        }, 1000);
+    }
+
+    /**
+     * Update playback duration display
+     */
+    function updatePlaybackDurationDisplay(seconds) {
+        const formatted = formatTime(seconds);
+        const maxSeconds = parseInt(playbackDuration.max);
+        const isFullTrack = seconds >= maxSeconds;
+        playbackDurationDisplay.textContent = formatted;
+        
+        const hintElement = playbackDurationDisplay.nextElementSibling;
+        if (hintElement && hintElement.classList.contains('duration-hint')) {
+            hintElement.textContent = isFullTrack ? '(full track)' : '(partial)';
+        }
     }
 
     // Initialize when DOM is ready

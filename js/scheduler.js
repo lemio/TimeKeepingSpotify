@@ -64,6 +64,8 @@ const Scheduler = (function() {
      * @param {number} schedule.volume - Volume level (0-100)
      * @param {boolean} schedule.restorePlayback - Whether to restore previous playback after song ends
      * @param {boolean} schedule.repeat - Whether to repeat daily
+     * @param {number} schedule.playbackDuration - Duration to play in seconds
+     * @param {number} schedule.trackDuration - Full track duration in seconds
      */
     function addSchedule(schedule) {
         const newSchedule = {
@@ -77,6 +79,8 @@ const Scheduler = (function() {
             repeat: schedule.repeat !== false, // Default to repeat daily
             triggered: false,
             enabled: true,
+            playbackDuration: schedule.playbackDuration || null,
+            trackDuration: schedule.trackDuration || null
         };
         schedules.push(newSchedule);
         saveSchedules();
@@ -187,8 +191,11 @@ const Scheduler = (function() {
             // Show notification
             showNotification(`Now playing: ${schedule.trackName}`);
 
-            // If restore is enabled, monitor for track end
-            if (schedule.restorePlayback && previousPlaybackState) {
+            // If playback duration is set and less than full track, monitor and stop
+            if (schedule.playbackDuration && schedule.trackDuration && schedule.playbackDuration < schedule.trackDuration) {
+                monitorPlaybackDuration(schedule);
+            } else if (schedule.restorePlayback && previousPlaybackState) {
+                // If restore is enabled and playing full track, monitor for track end
                 monitorTrackEnd(schedule, previousPlaybackState);
             }
 
@@ -196,6 +203,52 @@ const Scheduler = (function() {
             console.error('Error triggering schedule:', error);
             showNotification(`Error: ${error.message}`, true);
         }
+    }
+
+    /**
+     * Monitor playback and stop after specified duration
+     * @param {Object} schedule - The triggered schedule
+     */
+    async function monitorPlaybackDuration(schedule) {
+        const targetDuration = schedule.playbackDuration * 1000; // Convert to ms
+        const startTime = Date.now();
+        
+        const checkPlayback = setInterval(async () => {
+            try {
+                const elapsed = Date.now() - startTime;
+                
+                // Stop playback when duration is reached
+                if (elapsed >= targetDuration) {
+                    clearInterval(checkPlayback);
+                    
+                    const currentState = await SpotifyAPI.getPlaybackState();
+                    
+                    // Only pause if still playing the scheduled track
+                    if (currentState && currentState.item?.uri === schedule.trackUri) {
+                        await SpotifyAPI.pause();
+                        
+                        // If restore is enabled, restore previous playback
+                        if (schedule.restorePlayback && previousPlaybackState) {
+                            await new Promise(resolve => setTimeout(resolve, 1000));
+                            await restorePreviousPlayback(previousPlaybackState);
+                        }
+                    }
+                    return;
+                }
+                
+                // Check if user changed the track
+                const currentState = await SpotifyAPI.getPlaybackState();
+                if (!currentState || currentState.item?.uri !== schedule.trackUri) {
+                    clearInterval(checkPlayback);
+                    // User changed the track, don't interfere
+                    return;
+                }
+                
+            } catch (error) {
+                console.error('Error monitoring playback duration:', error);
+                clearInterval(checkPlayback);
+            }
+        }, 1000);
     }
 
     /**
