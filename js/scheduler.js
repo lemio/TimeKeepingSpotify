@@ -11,6 +11,8 @@ const Scheduler = (function() {
     let schedules = [];
     let checkInterval = null;
     let previousPlaybackState = null;
+    let activeSchedule = null; // Track the currently active schedule
+    let activeScheduleStartTime = null; // When the active schedule started playing
 
     /**
      * Initialize the scheduler
@@ -161,8 +163,10 @@ const Scheduler = (function() {
             console.log(`Triggering schedule: ${schedule.trackName} at ${schedule.time}`);
 
             // Store current playback state if restore is enabled
+            let savedPlaybackState = null;
             if (schedule.restorePlayback) {
-                previousPlaybackState = await SpotifyAPI.getPlaybackState();
+                savedPlaybackState = await SpotifyAPI.getPlaybackState();
+                previousPlaybackState = savedPlaybackState; // Keep for module-level access
             }
 
             // Pause current playback
@@ -183,33 +187,43 @@ const Scheduler = (function() {
                 uris: [schedule.trackUri]
             });
 
-            // Mark as triggered
+            // Mark as triggered and active
             schedule.triggered = true;
             schedule.lastTriggeredDate = new Date().toDateString();
             saveSchedules();
+            
+            // Set as active schedule
+            activeSchedule = schedule;
+            activeScheduleStartTime = Date.now();
 
             // Show notification
             showNotification(`Now playing: ${schedule.trackName}`);
 
             // If playback duration is set and less than full track, monitor and stop
             if (schedule.playbackDuration && schedule.trackDuration && schedule.playbackDuration < schedule.trackDuration) {
-                monitorPlaybackDuration(schedule);
-            } else if (schedule.restorePlayback && previousPlaybackState) {
+                monitorPlaybackDuration(schedule, savedPlaybackState);
+            } else if (schedule.restorePlayback && savedPlaybackState) {
                 // If restore is enabled and playing full track, monitor for track end
-                monitorTrackEnd(schedule, previousPlaybackState);
+                monitorTrackEnd(schedule, savedPlaybackState);
+            } else {
+                // No restore needed, but still monitor to clear active state
+                monitorForCompletion(schedule);
             }
 
         } catch (error) {
             console.error('Error triggering schedule:', error);
             showNotification(`Error: ${error.message}`, true);
+            activeSchedule = null;
+            activeScheduleStartTime = null;
         }
     }
 
     /**
      * Monitor playback and stop after specified duration
      * @param {Object} schedule - The triggered schedule
+     * @param {Object} savedPlaybackState - The saved playback state to restore
      */
-    async function monitorPlaybackDuration(schedule) {
+    async function monitorPlaybackDuration(schedule, savedPlaybackState) {
         const targetDuration = schedule.playbackDuration * 1000; // Convert to ms
         const startTime = Date.now();
         
@@ -223,16 +237,20 @@ const Scheduler = (function() {
                     
                     const currentState = await SpotifyAPI.getPlaybackState();
                     
-                    // Only pause if still playing the scheduled track
+                    // Only pause/restore if still playing the scheduled track
                     if (currentState && currentState.item?.uri === schedule.trackUri) {
                         await SpotifyAPI.pause();
                         
                         // If restore is enabled, restore previous playback
-                        if (schedule.restorePlayback && previousPlaybackState) {
+                        if (schedule.restorePlayback && savedPlaybackState) {
                             await new Promise(resolve => setTimeout(resolve, 1000));
-                            await restorePreviousPlayback(previousPlaybackState);
+                            await restorePreviousPlayback(savedPlaybackState);
                         }
                     }
+                    
+                    // Clear active schedule
+                    activeSchedule = null;
+                    activeScheduleStartTime = null;
                     return;
                 }
                 
@@ -241,12 +259,16 @@ const Scheduler = (function() {
                 if (!currentState || currentState.item?.uri !== schedule.trackUri) {
                     clearInterval(checkPlayback);
                     // User changed the track, don't interfere
+                    activeSchedule = null;
+                    activeScheduleStartTime = null;
                     return;
                 }
                 
             } catch (error) {
                 console.error('Error monitoring playback duration:', error);
                 clearInterval(checkPlayback);
+                activeSchedule = null;
+                activeScheduleStartTime = null;
             }
         }, 1000);
     }
@@ -263,6 +285,8 @@ const Scheduler = (function() {
             checkCount++;
             if (checkCount > MAX_TRACK_MONITOR_SECONDS) {
                 clearInterval(checkPlayback);
+                activeSchedule = null;
+                activeScheduleStartTime = null;
                 return;
             }
 
@@ -272,6 +296,8 @@ const Scheduler = (function() {
                 // Check if the scheduled track is still playing
                 if (!currentState || !currentState.is_playing) {
                     clearInterval(checkPlayback);
+                    activeSchedule = null;
+                    activeScheduleStartTime = null;
                     await restorePreviousPlayback(prevState);
                     return;
                 }
@@ -281,17 +307,59 @@ const Scheduler = (function() {
                 if (currentTrackUri && currentTrackUri !== schedule.trackUri) {
                     clearInterval(checkPlayback);
                     // User changed the track, don't restore
+                    activeSchedule = null;
+                    activeScheduleStartTime = null;
                     return;
                 }
 
                 // Check if track has ended (progress near duration)
                 if (currentState.item && currentState.progress_ms >= currentState.item.duration_ms - 1000) {
                     clearInterval(checkPlayback);
+                    activeSchedule = null;
+                    activeScheduleStartTime = null;
                     await restorePreviousPlayback(prevState);
                 }
 
             } catch (error) {
                 console.error('Error monitoring playback:', error);
+                activeSchedule = null;
+                activeScheduleStartTime = null;
+            }
+        }, 1000);
+    }
+
+    /**
+     * Monitor for playback completion (no restore)
+     * @param {Object} schedule - The triggered schedule
+     */
+    async function monitorForCompletion(schedule) {
+        let checkCount = 0;
+
+        const checkPlayback = setInterval(async () => {
+            checkCount++;
+            if (checkCount > MAX_TRACK_MONITOR_SECONDS) {
+                clearInterval(checkPlayback);
+                activeSchedule = null;
+                activeScheduleStartTime = null;
+                return;
+            }
+
+            try {
+                const currentState = await SpotifyAPI.getPlaybackState();
+
+                // Check if track is no longer playing or changed
+                if (!currentState || !currentState.is_playing || currentState.item?.uri !== schedule.trackUri) {
+                    clearInterval(checkPlayback);
+                    activeSchedule = null;
+                    activeScheduleStartTime = null;
+                    return;
+                }
+
+            } catch (error) {
+                console.error('Error monitoring playback completion:', error);
+                clearInterval(checkPlayback);
+                activeSchedule = null;
+                activeScheduleStartTime = null;
             }
         }, 1000);
     }
@@ -369,6 +437,33 @@ const Scheduler = (function() {
         }
     }
 
+    /**
+     * Get the currently active schedule and its status
+     * @returns {Object|null} Active schedule info or null
+     */
+    function getActiveScheduleStatus() {
+        if (!activeSchedule || !activeScheduleStartTime) {
+            return null;
+        }
+
+        const elapsed = Math.floor((Date.now() - activeScheduleStartTime) / 1000);
+        let remaining = null;
+        
+        if (activeSchedule.playbackDuration && activeSchedule.trackDuration && 
+            activeSchedule.playbackDuration < activeSchedule.trackDuration) {
+            remaining = Math.max(0, activeSchedule.playbackDuration - elapsed);
+        } else if (activeSchedule.trackDuration) {
+            remaining = Math.max(0, activeSchedule.trackDuration - elapsed);
+        }
+
+        return {
+            schedule: activeSchedule,
+            elapsed: elapsed,
+            remaining: remaining,
+            willRestore: activeSchedule.restorePlayback
+        };
+    }
+
     // Public API
     return {
         init,
@@ -380,5 +475,6 @@ const Scheduler = (function() {
         stopChecking,
         resetDailySchedules,
         triggerNow,
+        getActiveScheduleStatus,
     };
 })();

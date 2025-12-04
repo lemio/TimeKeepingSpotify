@@ -336,18 +336,8 @@ const App = (function() {
             trackDuration: selectedTrack.duration_ms ? Math.floor(selectedTrack.duration_ms / 1000) : null
         });
 
-        // Reset form
-        scheduleForm.reset();
-        volumeDisplay.textContent = '50%';
-        selectedTrack = null;
-        trackDurationInfo.classList.add('hidden');
-        
-        // Reset playback duration to default
-        playbackDuration.max = 300;
-        playbackDuration.value = 300;
-        playbackDurationNumber.max = 300;
-        playbackDurationNumber.value = 300;
-        updatePlaybackDurationDisplay(300);
+        // Only reset the time field (keep volume, track, checkbox, and playback duration)
+        scheduleTime.value = '';
 
         // Refresh schedule list
         renderSchedules();
@@ -363,6 +353,7 @@ const App = (function() {
      */
     function renderSchedules() {
         const schedules = Scheduler.getSchedules();
+        const activeStatus = Scheduler.getActiveScheduleStatus();
 
         if (schedules.length === 0) {
             schedulesList.innerHTML = '<p class="text-muted">No scheduled items</p>';
@@ -377,8 +368,24 @@ const App = (function() {
             const playbackInfo = schedule.playbackDuration && schedule.trackDuration ? 
                 ` · Play: ${formatTime(schedule.playbackDuration)}/${formatTime(schedule.trackDuration)}` : '';
             
+            const isActive = activeStatus && activeStatus.schedule.id === schedule.id;
+            const activeClass = isActive ? 'active-schedule' : '';
+            
+            let activeStatusHTML = '';
+            if (isActive) {
+                const elapsedText = formatTime(activeStatus.elapsed);
+                const remainingText = activeStatus.remaining !== null ? formatTime(activeStatus.remaining) : '?';
+                const restoreText = activeStatus.willRestore ? ' → will restore' : '';
+                activeStatusHTML = `
+                    <div class="active-status" data-schedule-id="${schedule.id}">
+                        <span class="active-badge">🔊 PLAYING</span>
+                        <span class="active-time">Elapsed: <strong>${elapsedText}</strong> | Remaining: <strong>${remainingText}</strong>${restoreText}</span>
+                    </div>
+                `;
+            }
+            
             return `
-                <div class="schedule-item ${schedule.enabled ? '' : 'disabled'}" data-id="${schedule.id}">
+                <div class="schedule-item ${schedule.enabled ? '' : 'disabled'} ${activeClass}" data-id="${schedule.id}">
                     <span class="time">${schedule.time}</span>
                     <div class="track-info">
                         <div class="track-name">${escapeHtml(schedule.trackName)}</div>
@@ -386,6 +393,7 @@ const App = (function() {
                             ${escapeHtml(schedule.artistName)} · Volume: ${schedule.volume}%${playbackInfo}
                             ${schedule.restorePlayback ? '<span class="restore-badge">↩ Restore</span>' : ''}
                         </div>
+                        ${activeStatusHTML}
                         <div class="countdown" data-time="${schedule.time}">${countdownText}</div>
                     </div>
                     <div class="schedule-actions">
@@ -423,7 +431,7 @@ const App = (function() {
             });
         });
         
-        // Start countdown updates
+        // Start countdown updates and active schedule updates
         startCountdownUpdates();
     }
 
@@ -585,7 +593,7 @@ const App = (function() {
     }
 
     /**
-     * Start updating countdowns
+     * Start updating countdowns and active schedule status
      */
     function startCountdownUpdates() {
         if (countdownInterval) {
@@ -593,6 +601,7 @@ const App = (function() {
         }
         
         countdownInterval = setInterval(() => {
+            // Update countdowns
             document.querySelectorAll('.countdown').forEach(element => {
                 const scheduleTime = element.dataset.time;
                 if (scheduleTime) {
@@ -605,6 +614,22 @@ const App = (function() {
                     } else {
                         element.classList.remove('past');
                     }
+                }
+            });
+            
+            // Update active schedule status
+            const activeStatus = Scheduler.getActiveScheduleStatus();
+            document.querySelectorAll('.active-status').forEach(element => {
+                const scheduleId = element.dataset.scheduleId;
+                if (activeStatus && activeStatus.schedule.id === scheduleId) {
+                    const elapsedText = formatTime(activeStatus.elapsed);
+                    const remainingText = activeStatus.remaining !== null ? formatTime(activeStatus.remaining) : '?';
+                    const restoreText = activeStatus.willRestore ? ' → will restore' : '';
+                    element.querySelector('.active-time').innerHTML = 
+                        `Elapsed: <strong>${elapsedText}</strong> | Remaining: <strong>${remainingText}</strong>${restoreText}`;
+                } else {
+                    // Active schedule ended, re-render to remove active status
+                    renderSchedules();
                 }
             });
         }, 1000);
