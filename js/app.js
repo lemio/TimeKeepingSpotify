@@ -333,7 +333,7 @@ const App = (function() {
             volume: parseInt(scheduleVolume.value),
             restorePlayback: scheduleRestore.checked,
             playbackDuration: playbackDurationSeconds,
-            trackDuration: selectedTrack.duration_ms ? Math.floor(selectedTrack.duration_ms / 1000) : playbackDurationSeconds
+            trackDuration: selectedTrack.duration_ms ? Math.floor(selectedTrack.duration_ms / 1000) : null
         });
 
         // Reset form
@@ -509,19 +509,26 @@ const App = (function() {
             // Calculate time difference in minutes
             const [h1, m1] = lastTwo[0].time.split(':').map(Number);
             const [h2, m2] = lastTwo[1].time.split(':').map(Number);
-            const time1 = h1 * 60 + m1;
-            const time2 = h2 * 60 + m2;
+            let time1 = h1 * 60 + m1;
+            let time2 = h2 * 60 + m2;
+            
+            // Handle day boundary - if time2 is less than time1, add 24 hours to time2
+            if (time2 < time1) {
+                time2 += 24 * 60;
+            }
+            
             const diff = time2 - time1;
             
             // Apply the same difference
             const [h, m] = lastTime.split(':').map(Number);
             const currentMinutes = h * 60 + m;
-            const nextMinutes = currentMinutes + diff;
+            let nextMinutes = currentMinutes + diff;
             
-            // Handle day overflow
-            const finalMinutes = nextMinutes % (24 * 60);
-            const nextHours = Math.floor(finalMinutes / 60);
-            const nextMins = finalMinutes % 60;
+            // Handle day overflow - normalize to 0-1439 range
+            nextMinutes = ((nextMinutes % (24 * 60)) + (24 * 60)) % (24 * 60);
+            
+            const nextHours = Math.floor(nextMinutes / 60);
+            const nextMins = nextMinutes % 60;
             
             const suggestedTime = `${String(nextHours).padStart(2, '0')}:${String(nextMins).padStart(2, '0')}`;
             scheduleTime.value = suggestedTime;
@@ -563,9 +570,7 @@ const App = (function() {
         const diffMinutes = Math.floor(diffSeconds / 60);
         const diffHours = Math.floor(diffMinutes / 60);
         
-        if (diffSeconds < 0) {
-            return 'Past';
-        } else if (diffSeconds < 60) {
+        if (diffSeconds < 60) {
             return `in ${diffSeconds} second${diffSeconds !== 1 ? 's' : ''}`;
         } else if (diffMinutes < 60) {
             const secs = diffSeconds % 60;
